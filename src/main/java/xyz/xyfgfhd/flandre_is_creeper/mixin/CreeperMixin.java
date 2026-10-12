@@ -16,13 +16,6 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import xyz.xyfgfhd.flandre_is_creeper.api.Scalable;
 
-/**
- * 双端 mixin，只管不牵扯客户端类的逻辑：
- *   1. 改引信长度/爆炸半径
- *   2. 吞掉 vanilla 的点燃嘶声
- *   3. 维护「是否锁定玩家」这个同步标志位
- *   4. 引信推进完全由 isAggressive 驱动，和歌同进同出；脱锁则冻结（不重置、不倒放）
- */
 @Mixin(Creeper.class)
 public abstract class CreeperMixin extends Entity implements Scalable {
 
@@ -56,12 +49,22 @@ public abstract class CreeperMixin extends Entity implements Scalable {
         // 故意留空
     }
 
+    @Unique
+    private boolean flandre$primed = false;
+
     @Inject(method = "tick", at = @At("TAIL"))
     private void flandre$driveFuse(CallbackInfo ci) {
-        Creeper self = (Creeper)(Object) this;
-        if (self.isIgnited()) {
-            if (scaleStartTick == -1) scaleStartTick = tickCount;
-            self.ignite();
+        Creeper self = (Creeper) (Object) this;
+
+        if (!flandre$primed && (self.isIgnited() || self.getSwellDir() > 0)) {
+            flandre$phase = 0;
+            flandre$primed = true;
+        }
+
+        if (flandre$primed) {
+            if (!self.level().isClientSide) self.setSwellDir(1);
+            flandre$phase++;
+            if (flandre$phase == 7) flandre$phase = 0;
         }
     }
 
@@ -74,18 +77,17 @@ public abstract class CreeperMixin extends Entity implements Scalable {
         }
     }
 
-        @Unique
-        private int scaleStartTick = -1;
+    @Unique
+    private int flandre$phase;
 
         @Override
         public float renderScale(float partialTick) {
-            if (this.scaleStartTick < 0) return 1.0F;
+            if (!flandre$primed) return 1.0F;
 
-            float elapsed = (this.tickCount - this.scaleStartTick) + partialTick;
+            float phase = (flandre$phase + partialTick) / 3.5F;
 
-            float phase = (elapsed % 14) / 7;
             float p = 0.75F - Math.abs(phase - 1.0F);
-            p = (float) (Math.log(1 + p) / Math.log(2));
-            return 1.0F + p*0.375F;
+            p = (float) (Math.log(1.0F + p) / Math.log(2.0));
+            return 1.0F + p * 0.375F;
         }
     }
